@@ -21,4 +21,5 @@ print("filtered as accidental:", [c["id"] for c in calls if c["accidental"]])
 
 html = (here / "dashboard.template.html").read_text(encoding="utf-8").replace("/*__VOICE__*/", (here / "voice.js").read_text(encoding="utf-8"))
 (here / "dashboard.html").write_text(html.replace("/*__DATA__*/null", json.dumps(payload)), encoding="utf-8")
-print("wrote dashboard.html")
+(here / "index.html").write_text((here / "dashboard.html").read_text(encoding="utf-8"), encoding="utf-8")  # root page for static hosts (Vercel, GitHub Pages)
+print("wrote dashboard.html and index.html")
