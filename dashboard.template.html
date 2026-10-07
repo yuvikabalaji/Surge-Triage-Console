@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surge Triage Console</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+:root{--bg:#0f1419;--panel:#171d25;--line:#263040;--text:#e6ebf2;--mute:#8b98ab;
+--p1:#ff4d4f;--p2:#ff9f43;--p3:#f7c948;--p4:#6b7788;--ok:#3ddc97;--accent:#4ea1ff}
+@media (prefers-color-scheme:light){:root{--bg:#f3f5f8;--panel:#fff;--line:#dde3ec;--text:#1a2230;--mute:#5b6779}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,sans-serif}
+header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between}
+h1{font-size:18px;margin:0}h1 small{color:var(--mute);font-weight:400;margin-left:8px}
+.stats{display:flex;gap:12px;flex-wrap:wrap}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:110px}
+.stat b{display:block;font-size:22px}.stat span{color:var(--mute);font-size:12px}
+.timebar{padding:12px 24px;display:flex;gap:12px;align-items:center;border-bottom:1px solid var(--line)}
+.timebar input{flex:1}button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:600}
+main{display:grid;grid-template-columns:minmax(320px,1fr) minmax(320px,1.2fr);gap:16px;padding:16px 24px}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:0 0 10px}
+.card{border:1px solid var(--line);border-left:5px solid var(--p4);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.card.P1{border-left-color:var(--p1)}.card.P2{border-left-color:var(--p2)}.card.P3{border-left-color:var(--p3)}
+.card.P1.fresh{animation:pulse 1.2s 2}
+@keyframes pulse{50%{background:rgba(255,77,79,.18)}}
+.top{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.badge{font-weight:700;font-size:12px;padding:2px 8px;border-radius:99px;color:#111}
+.badge.P1{background:var(--p1);color:#fff}.badge.P2{background:var(--p2)}.badge.P3{background:var(--p3)}.badge.P4{background:var(--p4);color:#fff}
+.meta{color:var(--mute);font-size:12px}.tags span{display:inline-block;background:var(--line);border-radius:4px;padding:1px 6px;margin:4px 4px 0 0;font-size:11px}
+.esc{color:var(--p1);font-weight:600;font-size:12px}
+.calls{display:none;margin-top:8px;border-top:1px dashed var(--line);padding-top:8px}.card.open .calls{display:block}
+.call{padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}.call:last-child{border:0}
+.why{color:var(--mute);font-size:11px}.dup{color:var(--ok);font-size:11px}
+#map{height:600px;border-radius:8px;border:1px solid var(--line);background:#1b2430}
+.darktiles{filter:invert(1) hue-rotate(200deg) brightness(.85) contrast(.9) saturate(.7)}
+.pin{position:relative}.pin .core{position:absolute;inset:0;margin:auto;width:46%;height:46%;border-radius:50%;border:2px solid #fff;box-shadow:0 0 6px rgba(0,0,0,.6)}
+.pin .ring{position:absolute;inset:0;border-radius:50%;opacity:.35}
+.pin.P1 .ring{animation:ping 1.6s ease-out infinite}
+@keyframes ping{0%{transform:scale(.5);opacity:.6}100%{transform:scale(1.25);opacity:0}}
+.pin b{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:2}
+.leaflet-popup-content{color:#1a2230;font:13px system-ui}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--mute);margin-top:6px;flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}
+
+.intake textarea{width:100%;min-height:84px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit;resize:vertical}
+.intake .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.mic{width:54px;height:54px;border-radius:50%;border:0;background:var(--accent);color:#fff;font-size:22px;cursor:pointer;position:relative;padding:0}
+.mic.rec{background:var(--p1);animation:micpulse 1.2s infinite}
+@keyframes micpulse{0%{box-shadow:0 0 0 0 rgba(255,77,79,.6)}100%{box-shadow:0 0 0 18px rgba(255,77,79,0)}}
+.mic:disabled{opacity:.4;cursor:not-allowed}
+.stop{background:var(--panel);color:var(--text);border:1px solid var(--line)}.stop:disabled{opacity:.4}
+.intake select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px}
+.status{font-size:12px;color:var(--mute)}.warn{background:rgba(255,159,67,.15);border:1px solid var(--p2);color:var(--p2);padding:8px 10px;border-radius:8px;font-size:12px;margin-bottom:10px}
+.meters{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+.meter{font-size:11px;color:var(--mute)}.meter div{height:10px;border-radius:5px;background:var(--line);overflow:hidden;margin:3px 0}
+.meter u{display:block;height:100%;width:0;background:var(--ok);transition:width .2s,background .2s}
+.live{margin-top:8px;min-height:24px}.result{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px}
+.hl{background:rgba(255,77,79,.25);border-radius:3px;padding:0 2px}
+.empty{color:var(--mute);padding:8px}
+.rank{display:inline-block;min-width:26px;text-align:center;background:var(--text);color:var(--bg);border-radius:6px;font-weight:700;margin-right:8px;padding:0 6px}
+.score{font-weight:700;margin-right:8px}
+.disp{font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;margin-right:8px}
+.disp.go{background:var(--ok);color:#06251a}.disp.wait{background:transparent;border:1px solid var(--p2);color:var(--p2)}
+.bars{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 12px;margin-top:6px}
+.bar{font-size:11px;color:var(--mute)}.bar i{display:block;height:5px;border-radius:3px;background:var(--line);margin-top:2px;position:relative;overflow:hidden}
+.bar i u{position:absolute;inset:0 auto 0 0;background:var(--accent);border-radius:3px}
+.note{font-size:12px;color:var(--p2);margin-top:6px}
+.timebar label{color:var(--mute);font-size:12px;white-space:nowrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>Surge Triage Console<small>duplicate detection + priority flagging</small></h1>
+  <div class="stats" id="stats"></div>
+</header>
+<div class="timebar">
+  <button id="play">Replay</button>
+  <input id="slider" type="range" min="0" max="65" value="65">
+  <b id="clock"></b>
+  <label>Units free: <b id="unitsv">5</b></label><input id="units" type="range" min="1" max="12" value="5" style="flex:0 0 120px">
+</div>
+<main>
+  <div>
+    <div class="panel intake" style="margin-bottom:16px"><h2>Live call intake (voice)</h2>
+      <div id="vwarn" class="warn" style="display:none"></div>
+      <div class="row">
+        <button class="mic" id="mic" title="Start / stop recording">&#127908;</button>
+        <select id="loc"></select>
+        <span class="status" id="vstatus">Idle. Press the microphone and describe the emergency.</span>
+      </div>
+      <textarea id="vt" placeholder="Live transcript appears here. You can also type or paste a transcript and press Analyze."></textarea>
+      <div class="row" style="margin:8px 0 0"><button id="analyze">Analyze &amp; submit as call</button><span class="status">The call is scored and placed on the map while you speak; this button stops recording and finalizes it.</span></div>
+      <div class="live" id="livechips"></div>
+      <div class="meters">
+        <div class="meter">Mic volume <b id="dbv"></b><div><u id="dbbar"></u></div></div>
+        <div class="meter">Vocal stress index <b id="stv">n/a</b><div><u id="stbar"></u></div></div>
+      </div>
+      <div class="result" id="vresult" style="display:none"></div>
+    </div>
+    <div class="panel"><h2>Ranked response queue (P1 / P2)</h2><div id="urgent"></div></div>
+    <div class="panel" style="margin-top:16px"><h2>Other incidents</h2><div id="other"></div></div>
+    <div class="panel" style="margin-top:16px"><h2>Filtered (not counted as incidents)</h2><div id="filtered"></div></div>
+  </div>
+  <div class="panel" style="align-self:start"><h2>Incident map (size = callers; #n = response rank)</h2>
+    <div id="map"></div>
+    <div class="legend"><span><i style="background:var(--p1)"></i>P1</span><span><i style="background:var(--p2)"></i>P2</span><span><i style="background:var(--p3)"></i>P3</span><span><i style="background:var(--p4)"></i>P4</span><span>dots = individual calls, faint circle = GPS accuracy</span></div>
+  </div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const DATA = /*__DATA__*/null;
+const RANK = {P1:0,P2:1,P3:2,P4:3}, NAMES = ["P1","P2","P3","P4"];
+const COLOR = {P1:"var(--p1)",P2:"var(--p2)",P3:"var(--p3)",P4:"var(--p4)"};
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const open = new Set(), seenP1 = new Set();
+
+const units=()=>+document.getElementById("units").value;
+function levelOf(points){const L=DATA.config.levels;return points>=L.P1?"P1":points>=L.P2?"P2":points>=L.P3?"P3":"P4"}
+function bump(level,n){return NAMES[Math.max(0,RANK[level]-n)]}
+
+function snapshot(T){
+  const calls = DATA.calls.filter(c=>c.t<=T);
+  const real = calls.filter(c=>!c.accidental);
+  const out = DATA.clusters.map(cl=>{
+    const m = real.filter(c=>c.cluster===cl.id);
+    if(!m.length) return null;
+    const callers = new Set(m.map(c=>c.caller)).size;
+    const maxPts = Math.max(...m.map(c=>c.points));
+    let base = levelOf(maxPts), level = base, reasons = [];
+    for(const [n,b] of DATA.config.size_bumps){ if(callers>=n){ level=bump(base,b); if(level!==base) reasons.push(callers+" distinct callers: surge escalation"); break; } }
+    const first = m[0];
+    const escalated = RANK[level] < RANK[levelOf(first.points)];
+    const all = [...new Set(m.flatMap(c=>c.reasons.filter(r=>!r.includes("ignored")&&!r.includes("suppressed")).map(r=>r.replace(/ \(\+\d+\)/,""))))];
+    return {id:cl.id, place:cl.place, calls:m, callers, level, escalated, reasons:[...reasons,...all],
+      lat:m.reduce((a,c)=>a+c.lat,0)/m.length, lon:m.reduce((a,c)=>a+c.lon,0)/m.length,
+      types:[...new Set(m.map(c=>c.type).filter(t=>t!=="other"))], firstT:first.t, lastT:m[m.length-1].t};
+  }).filter(Boolean);
+  for(const i of out){
+    const recent=i.calls.filter(c=>c.t>T-10).length, maxPts=Math.max(...i.calls.map(c=>c.points));
+    const allReasons=i.calls.flatMap(c=>c.reasons).join(" ");
+    const f={
+      "Time-critical":Math.min(1,maxPts/8),
+      "Lives at risk":Math.min(1,.15+i.callers/10),
+      "Growth":Math.min(1,recent/5*.7+(i.escalated?.3:0)),
+      "Vulnerability":/vulnerable/.test(allReasons)?1:/critical location/.test(allReasons)?.7:0,
+      "Confidence":Math.min(1,i.callers/4)};
+    const w=Math.min(10,.25*(T-i.firstT)), tier={P1:30,P2:10,P3:0,P4:-10}[i.level];
+    i.factors=f; i.wait=w;
+    i.score=Math.round(40*f["Time-critical"]+25*f["Lives at risk"]+15*f["Growth"]+10*f["Vulnerability"]+10*f["Confidence"]+w+tier);
+  }
+  out.sort((a,b)=>b.score-a.score);
+  out.forEach((i,k)=>i.rank=k+1);
+  return {calls, out, filtered:calls.filter(c=>c.accidental)};
+}
+
+function card(i){
+  const fresh = i.level==="P1" && !seenP1.has(i.id); if(i.level==="P1") seenP1.add(i.id);
+  return `<div class="card ${i.level} ${fresh?"fresh":""} ${open.has(i.id)?"open":""}" data-id="${i.id}">
+    <div class="top"><b><span class="rank">${i.rank}</span>${esc(i.place)} <span class="meta">· ${esc(i.types.join("/")||"unclassified")}</span></b>
+      <span>${i.level==="P1"||i.level==="P2"?(i.rank<=units()?'<span class="disp go">DISPATCH NOW</span>':'<span class="disp wait">QUEUED</span>'):""}<span class="score" title="response score">${i.score}</span><span class="badge ${i.level}">${i.level}</span></span></div>
+    <div class="meta">${i.calls.length} calls → 1 incident · ${i.callers} callers · first at ${i.firstT} min, latest ${i.lastT} min</div>
+    ${i.escalated?`<div class="esc">▲ Escalated since first report</div>`:""}
+    <div class="bars">${Object.entries(i.factors).map(([k,v])=>`<div class="bar">${k}<i><u style="width:${Math.round(v*100)}%"></u></i></div>`).join("")}<div class="bar">Waiting +${i.wait.toFixed(1)}</div></div>
+    ${(i.level==="P1"||i.level==="P2")&&i.rank>units()?`<div class="note">No unit free: send automated callback and self-help guidance (e.g. CPR / shelter instructions) while queued.</div>`:""}
+    <div class="tags">${i.reasons.slice(0,8).map(r=>`<span>${esc(r)}</span>`).join("")}</div>
+    <div class="calls">${i.calls.map(c=>`<div class="call"><b>${c.id}</b> <span class="meta">t=${c.t} · ${esc(c.caller)} · ${c.level}</span><br>${esc(c.transcript||"(no speech)")}
+      <div class="why">${c.audio?"audio: "+esc(c.audio)+" · ":""}location: ${esc(c.loc_source)}${c.reasons.length?" · "+esc(c.reasons.join("; ")):""}</div>
+      ${c.match?`<div class="dup">⇄ linked to ${c.match.with}: score ${c.match.score} (dist ${c.match.dist_m} m, geo ${c.match.geo}, time ${c.match.time}, text ${c.match.text}${c.match.same_caller?", same caller":""})</div>`:`<div class="dup">first report of this incident</div>`}</div>`).join("")}</div>
+  </div>`;
+}
+
+const HEX = {P1:"#ff4d4f",P2:"#ff9f43",P3:"#f7c948",P4:"#6b7788"};
+const map = L.map("map",{zoomControl:true,attributionControl:true});
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  {maxZoom:19,className:"darktiles",attribution:"&copy; OpenStreetMap contributors"}).addTo(map);
+const layer = L.layerGroup().addTo(map);
+map.fitBounds(L.latLngBounds(DATA.calls.map(c=>[c.lat,c.lon])).pad(0.15));
+const pins = {};
+
+function flyTo(id){const i=pins[id]; if(i) map.flyTo(i,15,{duration:.8});}
+
+function drawMap(incs, calls){
+  layer.clearLayers();
+  for(const c of calls){ if(c.accidental) continue; const cl=incs.find(i=>i.id===c.cluster);
+    L.circle([c.lat,c.lon],{radius:Math.min(Math.max(c.acc,8),200),color:HEX[cl?cl.level:"P4"],weight:1,fillOpacity:.08,opacity:.5}).addTo(layer);
+    L.circleMarker([c.lat,c.lon],{radius:3,color:"#fff",weight:1,fillColor:HEX[cl?cl.level:"P4"],fillOpacity:.9}).addTo(layer)
+      .bindTooltip(c.id+": "+c.transcript.slice(0,60)); }
+  for(const i of incs){
+    const size = 34+Math.sqrt(i.callers)*10; pins[i.id]=[i.lat,i.lon];
+    const icon = L.divIcon({className:"",iconSize:[size,size],iconAnchor:[size/2,size/2],
+      html:`<div class="pin ${i.level}" style="width:${size}px;height:${size}px"><div class="ring" style="background:${HEX[i.level]}"></div><div class="core" style="background:${HEX[i.level]}"></div><b>${RANK[i.level]<=1?"#"+i.rank:i.callers}</b></div>`});
+    L.marker([i.lat,i.lon],{icon}).addTo(layer)
+      .bindPopup(`<b>${esc(i.place)}</b> &middot; ${i.level}<br>${i.calls.length} calls &rarr; 1 incident<br>rank #${i.rank} &middot; score ${i.score}<br>${esc(i.types.join("/")||"unclassified")}${i.escalated?"<br><b style='color:#d33'>Escalated</b>":""}`)
+      .on("click",()=>{open.add(i.id);render();document.querySelector(`.card[data-id="${i.id}"]`)?.scrollIntoView({block:"center"});});
+  }
+}
+
+function render(){
+  const T = +document.getElementById("slider").value;
+  document.getElementById("clock").textContent = "T+"+T+" min";
+  const {calls,out,filtered} = snapshot(T);
+  const urgent = out.filter(i=>RANK[i.level]<=1), rest = out.filter(i=>RANK[i.level]>1);
+  const real = calls.length-filtered.length;
+  document.getElementById("stats").innerHTML = [
+    ["Calls received",calls.length],["Incidents",out.length],["Duplicates collapsed",real-out.length],
+    ["P1 incidents",out.filter(i=>i.level==="P1").length],["Filtered",filtered.length]
+  ].map(([l,v])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+  document.getElementById("urgent").innerHTML = urgent.map(card).join("")||'<div class="empty">None</div>';
+  document.getElementById("other").innerHTML = rest.map(card).join("")||'<div class="empty">None</div>';
+  document.getElementById("filtered").innerHTML = filtered.map(c=>`<div class="call"><b>${c.id}</b> ${esc(c.transcript)}<div class="why">flagged accidental - excluded from incident counts, kept in audit log</div></div>`).join("")||'<div class="empty">None</div>';
+  drawMap(out, calls);
+}
+
+document.addEventListener("click",e=>{const c=e.target.closest(".card"); if(!c) return; const id=+c.dataset.id; open.has(id)?open.delete(id):(open.add(id),flyTo(id)); render();});
+const slider = document.getElementById("slider"); slider.oninput = render;
+document.getElementById("units").oninput=e=>{document.getElementById("unitsv").textContent=e.target.value;render();};
+let timer=null;
+document.getElementById("play").onclick=()=>{
+  if(timer){clearInterval(timer);timer=null;return}
+  slider.value=0; seenP1.clear(); render();
+  timer=setInterval(()=>{ if(+slider.value>=+slider.max){clearInterval(timer);timer=null;return} slider.value=+slider.value+1; render(); },250);
+};
+render();
+</script>
+<script>
+/*__VOICE__*/
+</script>
+</body>
+</html>

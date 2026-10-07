@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surge Triage Console</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+:root{--bg:#0f1419;--panel:#171d25;--line:#263040;--text:#e6ebf2;--mute:#8b98ab;
+--p1:#ff4d4f;--p2:#ff9f43;--p3:#f7c948;--p4:#6b7788;--ok:#3ddc97;--accent:#4ea1ff}
+@media (prefers-color-scheme:light){:root{--bg:#f3f5f8;--panel:#fff;--line:#dde3ec;--text:#1a2230;--mute:#5b6779}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,sans-serif}
+header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between}
+h1{font-size:18px;margin:0}h1 small{color:var(--mute);font-weight:400;margin-left:8px}
+.stats{display:flex;gap:12px;flex-wrap:wrap}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:110px}
+.stat b{display:block;font-size:22px}.stat span{color:var(--mute);font-size:12px}
+.timebar{padding:12px 24px;display:flex;gap:12px;align-items:center;border-bottom:1px solid var(--line)}
+.timebar input{flex:1}button{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:600}
+main{display:grid;grid-template-columns:minmax(320px,1fr) minmax(320px,1.2fr);gap:16px;padding:16px 24px}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:0 0 10px}
+.card{border:1px solid var(--line);border-left:5px solid var(--p4);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.card.P1{border-left-color:var(--p1)}.card.P2{border-left-color:var(--p2)}.card.P3{border-left-color:var(--p3)}
+.card.P1.fresh{animation:pulse 1.2s 2}
+@keyframes pulse{50%{background:rgba(255,77,79,.18)}}
+.top{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.badge{font-weight:700;font-size:12px;padding:2px 8px;border-radius:99px;color:#111}
+.badge.P1{background:var(--p1);color:#fff}.badge.P2{background:var(--p2)}.badge.P3{background:var(--p3)}.badge.P4{background:var(--p4);color:#fff}
+.meta{color:var(--mute);font-size:12px}.tags span{display:inline-block;background:var(--line);border-radius:4px;padding:1px 6px;margin:4px 4px 0 0;font-size:11px}
+.esc{color:var(--p1);font-weight:600;font-size:12px}
+.calls{display:none;margin-top:8px;border-top:1px dashed var(--line);padding-top:8px}.card.open .calls{display:block}
+.call{padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}.call:last-child{border:0}
+.why{color:var(--mute);font-size:11px}.dup{color:var(--ok);font-size:11px}
+#map{height:600px;border-radius:8px;border:1px solid var(--line);background:#1b2430}
+.darktiles{filter:invert(1) hue-rotate(200deg) brightness(.85) contrast(.9) saturate(.7)}
+.pin{position:relative}.pin .core{position:absolute;inset:0;margin:auto;width:46%;height:46%;border-radius:50%;border:2px solid #fff;box-shadow:0 0 6px rgba(0,0,0,.6)}
+.pin .ring{position:absolute;inset:0;border-radius:50%;opacity:.35}
+.pin.P1 .ring{animation:ping 1.6s ease-out infinite}
+@keyframes ping{0%{transform:scale(.5);opacity:.6}100%{transform:scale(1.25);opacity:0}}
+.pin b{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff;font-size:12px;text-shadow:0 0 3px #000;z-index:2}
+.leaflet-popup-content{color:#1a2230;font:13px system-ui}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--mute);margin-top:6px;flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}
+
+.intake textarea{width:100%;min-height:84px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit;resize:vertical}
+.intake .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.mic{width:54px;height:54px;border-radius:50%;border:0;background:var(--accent);color:#fff;font-size:22px;cursor:pointer;position:relative;padding:0}
+.mic.rec{background:var(--p1);animation:micpulse 1.2s infinite}
+@keyframes micpulse{0%{box-shadow:0 0 0 0 rgba(255,77,79,.6)}100%{box-shadow:0 0 0 18px rgba(255,77,79,0)}}
+.mic:disabled{opacity:.4;cursor:not-allowed}
+.stop{background:var(--panel);color:var(--text);border:1px solid var(--line)}.stop:disabled{opacity:.4}
+.intake select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px}
+.status{font-size:12px;color:var(--mute)}.warn{background:rgba(255,159,67,.15);border:1px solid var(--p2);color:var(--p2);padding:8px 10px;border-radius:8px;font-size:12px;margin-bottom:10px}
+.meters{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+.meter{font-size:11px;color:var(--mute)}.meter div{height:10px;border-radius:5px;background:var(--line);overflow:hidden;margin:3px 0}
+.meter u{display:block;height:100%;width:0;background:var(--ok);transition:width .2s,background .2s}
+.live{margin-top:8px;min-height:24px}.result{margin-top:10px;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px}
+.hl{background:rgba(255,77,79,.25);border-radius:3px;padding:0 2px}
+.empty{color:var(--mute);padding:8px}
+.rank{display:inline-block;min-width:26px;text-align:center;background:var(--text);color:var(--bg);border-radius:6px;font-weight:700;margin-right:8px;padding:0 6px}
+.score{font-weight:700;margin-right:8px}
+.disp{font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;margin-right:8px}
+.disp.go{background:var(--ok);color:#06251a}.disp.wait{background:transparent;border:1px solid var(--p2);color:var(--p2)}
+.bars{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 12px;margin-top:6px}
+.bar{font-size:11px;color:var(--mute)}.bar i{display:block;height:5px;border-radius:3px;background:var(--line);margin-top:2px;position:relative;overflow:hidden}
+.bar i u{position:absolute;inset:0 auto 0 0;background:var(--accent);border-radius:3px}
+.note{font-size:12px;color:var(--p2);margin-top:6px}
+.timebar label{color:var(--mute);font-size:12px;white-space:nowrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>Surge Triage Console<small>duplicate detection + priority flagging</small></h1>
+  <div class="stats" id="stats"></div>
+</header>
+<div class="timebar">
+  <button id="play">Replay</button>
+  <input id="slider" type="range" min="0" max="65" value="65">
+  <b id="clock"></b>
+  <label>Units free: <b id="unitsv">5</b></label><input id="units" type="range" min="1" max="12" value="5" style="flex:0 0 120px">
+</div>
+<main>
+  <div>
+    <div class="panel intake" style="margin-bottom:16px"><h2>Live call intake (voice)</h2>
+      <div id="vwarn" class="warn" style="display:none"></div>
+      <div class="row">
+        <button class="mic" id="mic" title="Start / stop recording">&#127908;</button>
+        <select id="loc"></select>
+        <span class="status" id="vstatus">Idle. Press the microphone and describe the emergency.</span>
+      </div>
+      <textarea id="vt" placeholder="Live transcript appears here. You can also type or paste a transcript and press Analyze."></textarea>
+      <div class="row" style="margin:8px 0 0"><button id="analyze">Analyze &amp; submit as call</button><span class="status">The call is scored and placed on the map while you speak; this button stops recording and finalizes it.</span></div>
+      <div class="live" id="livechips"></div>
+      <div class="meters">
+        <div class="meter">Mic volume <b id="dbv"></b><div><u id="dbbar"></u></div></div>
+        <div class="meter">Vocal stress index <b id="stv">n/a</b><div><u id="stbar"></u></div></div>
+      </div>
+      <div class="result" id="vresult" style="display:none"></div>
+    </div>
+    <div class="panel"><h2>Ranked response queue (P1 / P2)</h2><div id="urgent"></div></div>
+    <div class="panel" style="margin-top:16px"><h2>Other incidents</h2><div id="other"></div></div>
+    <div class="panel" style="margin-top:16px"><h2>Filtered (not counted as incidents)</h2><div id="filtered"></div></div>
+  </div>
+  <div class="panel" style="align-self:start"><h2>Incident map (size = callers; #n = response rank)</h2>
+    <div id="map"></div>
+    <div class="legend"><span><i style="background:var(--p1)"></i>P1</span><span><i style="background:var(--p2)"></i>P2</span><span><i style="background:var(--p3)"></i>P3</span><span><i style="background:var(--p4)"></i>P4</span><span>dots = individual calls, faint circle = GPS accuracy</span></div>
+  </div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const DATA = {"calls": [{"id": "C001", "t": 0, "caller": "555-0100", "transcript": "There is a huge fire at the warehouse on 5th and Oak, lots of black smoke", "audio": null, "type": "fire", "points": 3, "level": "P2", "reasons": ["fire (+2)", "smoke (+1)"], "accidental": false, "cluster": 1, "match": null, "loc_source": "phone", "lat": 40.7131419604945, "lon": -74.00615330427486, "acc": 30}, {"id": "C002", "t": 1, "caller": "555-0101", "transcript": "Building on fire near 5th and Oak, flames coming out of the roof", "audio": null, "type": "fire", "points": 4, "level": "P2", "reasons": ["fire (+2)", "flames (+2)"], "accidental": false, "cluster": 1, "match": {"with": "C001", "score": 1.0, "dist_m": 35, "geo": 1.0, "time": 0.97, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.713201050397316, "lon": -74.00574106007561, "acc": 15}, {"id": "C003", "t": 2, "caller": "555-0102", "transcript": "I can see smoke and flames from the old warehouse, fire trucks needed", "audio": null, "type": "fire", "points": 5, "level": "P1", "reasons": ["smoke (+1)", "flames (+2)", "fire (+2)"], "accidental": false, "cluster": 1, "match": {"with": "C001", "score": 0.91, "dist_m": 118, "geo": 0.81, "time": 0.95, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71211425053846, "lon": -74.00651820162852, "acc": 30}, {"id": "C004", "t": 3, "caller": "555-0103", "transcript": "Warehouse blaze on Oak, thick smoke everywhere", "audio": null, "type": "fire", "points": 1, "level": "P3", "reasons": ["smoke (+1)"], "accidental": false, "cluster": 1, "match": {"with": "C001", "score": 0.99, "dist_m": 23, "geo": 1.0, "time": 0.93, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71317365011852, "lon": -74.00588166751815, "acc": 15}, {"id": "C005", "t": 4, "caller": "555-0104", "transcript": "Smoke is pouring out of the warehouse, it is burning badly", "audio": null, "type": "fire", "points": 1, "level": "P3", "reasons": ["smoke (+1)"], "accidental": false, "cluster": 1, "match": {"with": "C004", "score": 0.96, "dist_m": 56, "geo": 0.91, "time": 0.97, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71282674005659, "lon": -74.00539936067035, "acc": 15}, {"id": "C007", "t": 5, "caller": "555-0110", "transcript": "Warehouse fire, workers are trapped on the second floor", "audio": null, "type": "fire", "points": 6, "level": "P1", "reasons": ["fire (+2)", "trapped (+4)"], "accidental": false, "cluster": 1, "match": {"with": "C005", "score": 0.98, "dist_m": 8, "geo": 1.0, "time": 0.97, "type": 1.0, "text": 0.95, "same_caller": false}, "loc_source": "phone", "lat": 40.71288474606941, "lon": -74.00534135106315, "acc": 25}, {"id": "C024", "t": 5, "caller": "555-0300", "transcript": "A fight broke out near Lincoln High, I do not think anyone has a weapon", "audio": null, "type": "violence", "points": 3, "level": "P2", "reasons": ["fight (+1)", "'weapon' negated - ignored", "critical location: lincoln high (+2)"], "accidental": false, "cluster": 2, "match": null, "loc_source": "phone", "lat": 40.73236172933863, "lon": -73.98020595596218, "acc": 25}, {"id": "C006", "t": 6, "caller": "555-0105", "transcript": "Fire at the warehouse on 5th, you can see it from the highway", "audio": null, "type": "fire", "points": 2, "level": "P3", "reasons": ["fire (+2)"], "accidental": false, "cluster": 1, "match": {"with": "C001", "score": 0.98, "dist_m": 29, "geo": 1.0, "time": 0.85, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71288602653294, "lon": -74.00621647764264, "acc": 15}, {"id": "C016", "t": 6, "caller": "555-0200", "transcript": "Multi car crash on the Highway 9 overpass, several vehicles", "audio": null, "type": "crash", "points": 2, "level": "P3", "reasons": ["crash (+2)"], "accidental": false, "cluster": 3, "match": null, "loc_source": "phone", "lat": 40.72011662860995, "lon": -74.03893593217443, "acc": 25}, {"id": "C017", "t": 7, "caller": "555-0201", "transcript": "Big collision at highway 9 overpass, cars everywhere", "audio": null, "type": "crash", "points": 2, "level": "P3", "reasons": ["collision (+2)"], "accidental": false, "cluster": 3, "match": {"with": "C016", "score": 0.99, "dist_m": 53, "geo": 0.99, "time": 0.97, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.72014870238594, "lon": -74.03830916436866, "acc": 25}, {"id": "C025", "t": 7, "caller": "555-0301", "transcript": "Students fighting outside Lincoln High, a lot of shouting", "audio": null, "type": "other", "points": 2, "level": "P3", "reasons": ["critical location: lincoln high (+2)"], "accidental": false, "cluster": 2, "match": {"with": "C024", "score": 0.77, "dist_m": 99, "geo": 0.84, "time": 0.95, "type": 0.7, "text": 0.6, "same_caller": false}, "loc_source": "phone", "lat": 40.73287647439292, "lon": -73.98116562802016, "acc": 25}, {"id": "C008", "t": 8, "caller": "555-0101", "transcript": "Calling again about the warehouse fire, it is spreading to the next building", "audio": null, "type": "fire", "points": 2, "level": "P3", "reasons": ["fire (+2)"], "accidental": false, "cluster": 1, "match": {"with": "C002", "score": 1.0, "dist_m": 39, "geo": 1.0, "time": 0.82, "type": 1.0, "text": 0.71, "same_caller": true}, "loc_source": "phone", "lat": 40.7132474911799, "lon": -74.00620126215644, "acc": 25}, {"id": "C018", "t": 8, "caller": "555-0202", "transcript": "Wreck on highway 9, a truck hit two cars", "audio": null, "type": "crash", "points": 2, "level": "P3", "reasons": ["wreck (+2)"], "accidental": false, "cluster": 3, "match": {"with": "C016", "score": 0.99, "dist_m": 45, "geo": 1.0, "time": 0.95, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71971888192746, "lon": -74.03881855785673, "acc": 25}, {"id": "C010", "t": 9, "caller": "555-0111", "transcript": "My apartment next to the warehouse is filling with smoke, my mother is elderly and cannot walk", "audio": null, "type": "fire", "points": 4, "level": "P2", "reasons": ["smoke (+1)", "vulnerable person: elderly (+2)", "hazard + vulnerable person (+1)"], "accidental": false, "cluster": 1, "match": {"with": "C008", "score": 0.87, "dist_m": 82, "geo": 0.89, "time": 0.97, "type": 1.0, "text": 0.67, "same_caller": false}, "loc_source": "phone", "lat": 40.713823454463345, "lon": -74.0055931206724, "acc": 25}, {"id": "C019", "t": 9, "caller": "555-0203", "transcript": "Accident on the overpass, one car rolled over, a man is bleeding", "audio": null, "type": "crash", "points": 3, "level": "P2", "reasons": ["bleeding (+3)"], "accidental": false, "cluster": 3, "match": {"with": "C016", "score": 0.98, "dist_m": 58, "geo": 0.97, "time": 0.93, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71965990132666, "lon": -74.03926752340129, "acc": 25}, {"id": "C011", "t": 10, "caller": "555-0120", "transcript": "Fire somewhere downtown, huge smoke near the old warehouse", "audio": null, "type": "fire", "points": 3, "level": "P2", "reasons": ["fire (+2)", "smoke (+1)"], "accidental": false, "cluster": 1, "match": {"with": "C005", "score": 0.74, "dist_m": 120, "geo": 0.4, "time": 0.85, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71242841546499, "lon": -74.0040710552311, "acc": 1500}, {"id": "C021", "t": 10, "caller": "555-0210", "transcript": "Highway 9 overpass crash, driver is unconscious and not breathing", "audio": null, "type": "medical", "points": 12, "level": "P1", "reasons": ["not breathing (+6)", "crash (+2)", "unconscious (+4)"], "accidental": false, "cluster": 3, "match": {"with": "C016", "score": 0.99, "dist_m": 41, "geo": 1.0, "time": 0.9, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71991507298559, "lon": -74.0393375962138, "acc": 25}, {"id": "C009", "t": 11, "caller": "555-0102", "transcript": "Third time calling, a person is trapped at a second floor window at 5th and Oak", "audio": null, "type": "other", "points": 4, "level": "P2", "reasons": ["trapped (+4)"], "accidental": false, "cluster": 1, "match": {"with": "C007", "score": 0.85, "dist_m": 97, "geo": 0.84, "time": 0.85, "type": 0.7, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71201487101129, "lon": -74.00521392227363, "acc": 25}, {"id": "C020", "t": 12, "caller": "555-0204", "transcript": "There are a lot of cars crashed on highway 9 overpass, a child is crying in a car", "audio": null, "type": "other", "points": 2, "level": "P3", "reasons": ["vulnerable person: child (+2)"], "accidental": false, "cluster": 3, "match": {"with": "C017", "score": 0.92, "dist_m": 40, "geo": 1.0, "time": 0.88, "type": 0.7, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71980283134284, "lon": -74.03819533726264, "acc": 25}, {"id": "C026", "t": 12, "caller": "555-0302", "transcript": "Shots fired near Lincoln High School, people are running", "audio": "gunfire_bg", "type": "violence", "points": 12, "level": "P1", "reasons": ["shots fired (+6)", "critical location: school (+2)", "gunfire audible in background (+4)"], "accidental": false, "cluster": 2, "match": {"with": "C025", "score": 0.91, "dist_m": 59, "geo": 0.97, "time": 0.88, "type": 1.0, "text": 0.76, "same_caller": false}, "loc_source": "phone", "lat": 40.73260928097959, "lon": -73.98177279357225, "acc": 25}, {"id": "C012", "t": 13, "caller": "555-0121", "transcript": "I am calling for my brother, he is stuck at 5th and Oak, the warehouse is on fire and he cannot get out", "audio": null, "type": "fire", "points": 5, "level": "P1", "reasons": ["trapped (can't get out) (+3)", "fire (+2)"], "accidental": false, "cluster": 1, "match": {"with": "C006", "score": 0.97, "dist_m": 21, "geo": 1.0, "time": 0.82, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "spoken address: 5th and oak", "lat": 40.7128, "lon": -74.006, "acc": 60}, {"id": "C027", "t": 13, "caller": "555-0303", "transcript": "I heard gunshots at Lincoln High, kids are inside the building", "audio": null, "type": "violence", "points": 9, "level": "P1", "reasons": ["gunfire (+5)", "vulnerable person: kids (+2)", "critical location: lincoln high (+2)"], "accidental": false, "cluster": 2, "match": {"with": "C026", "score": 1.0, "dist_m": 27, "geo": 1.0, "time": 0.97, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.73249832404951, "lon": -73.98149068015582, "acc": 25}, {"id": "C022", "t": 14, "caller": "555-0211", "transcript": "Cars on the overpass, traffic stopped, lots of people standing around", "audio": null, "type": "other", "points": 0, "level": "P4", "reasons": [], "accidental": false, "cluster": 3, "match": {"with": "C019", "score": 0.85, "dist_m": 6, "geo": 1.0, "time": 0.88, "type": 0.7, "text": 0.71, "same_caller": false}, "loc_source": "phone", "lat": 40.719607385604874, "lon": -74.03926158841912, "acc": 25}, {"id": "C028", "t": 14, "caller": "555-0304", "transcript": "Lincoln High, gunfire, someone said there is a shooter", "audio": null, "type": "violence", "points": 13, "level": "P1", "reasons": ["gunfire (+5)", "shooter (+6)", "critical location: lincoln high (+2)"], "accidental": false, "cluster": 2, "match": {"with": "C027", "score": 0.95, "dist_m": 64, "geo": 0.95, "time": 0.97, "type": 1.0, "text": 0.88, "same_caller": false}, "loc_source": "phone", "lat": 40.73229873215364, "lon": -73.98220436614578, "acc": 25}, {"id": "C029", "t": 15, "caller": "555-0305", "transcript": "...", "audio": "whisper", "type": "other", "points": 2, "level": "P3", "reasons": ["whispering caller (+2)"], "accidental": false, "cluster": 2, "match": {"with": "C028", "score": 0.69, "dist_m": 41, "geo": 1.0, "time": 0.97, "type": 0.7, "text": 0.0, "same_caller": false}, "loc_source": "phone", "lat": 40.732270254720135, "lon": -73.98171496680268, "acc": 25}, {"id": "C036", "t": 15, "caller": "555-0600", "transcript": "Sorry, my phone was in my pocket, dialed by accident", "audio": null, "type": "crash", "points": 0, "level": "P4", "reasons": [], "accidental": true, "cluster": null, "match": null, "loc_source": "phone", "lat": 40.7506688164418, "lon": -73.95003832163609, "acc": 25}, {"id": "C013", "t": 16, "caller": "555-0122", "transcript": "Fire at the warehouse, more smoke now, explosion sound a minute ago", "audio": null, "type": "fire", "points": 8, "level": "P1", "reasons": ["fire (+2)", "smoke (+1)", "explosion (+5)"], "accidental": false, "cluster": 1, "match": {"with": "C004", "score": 0.94, "dist_m": 46, "geo": 0.98, "time": 0.68, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.712891840187055, "lon": -74.00627464205854, "acc": 25}, {"id": "C030", "t": 17, "caller": "555-0306", "transcript": "Please send police to Lincoln High, there is a man with a gun in the hallway", "audio": null, "type": "violence", "points": 7, "level": "P1", "reasons": ["gun (+5)", "critical location: lincoln high (+2)"], "accidental": false, "cluster": 2, "match": {"with": "C027", "score": 0.93, "dist_m": 58, "geo": 0.97, "time": 0.9, "type": 1.0, "text": 0.82, "same_caller": false}, "loc_source": "phone", "lat": 40.73238337746115, "lon": -73.98082486328192, "acc": 25}, {"id": "C015", "t": 18, "caller": "555-0130", "transcript": "My father has chest pain and feels dizzy, we live on Oak next to the warehouse", "audio": null, "type": "medical", "points": 4, "level": "P2", "reasons": ["chest pain (+4)"], "accidental": false, "cluster": 4, "match": null, "loc_source": "phone", "lat": 40.71288428604815, "lon": -74.00486963281912, "acc": 20}, {"id": "C031", "t": 20, "caller": "555-0400", "transcript": "My husband is not breathing, he collapsed in the kitchen, Riverside Apartments", "audio": null, "type": "medical", "points": 9, "level": "P1", "reasons": ["not breathing (+6)", "collapse (+3)"], "accidental": false, "cluster": 5, "match": null, "loc_source": "phone", "lat": 40.689906417457664, "lon": -73.9945497638115, "acc": 20}, {"id": "C014", "t": 22, "caller": "555-0123", "transcript": "Warehouse fire still burning, flames spreading", "audio": null, "type": "fire", "points": 4, "level": "P2", "reasons": ["fire (+2)", "flames (+2)"], "accidental": false, "cluster": 1, "match": {"with": "C013", "score": 0.95, "dist_m": 60, "geo": 0.97, "time": 0.85, "type": 1.0, "text": 0.95, "same_caller": false}, "loc_source": "phone", "lat": 40.7123517824808, "lon": -74.00633286897225, "acc": 25}, {"id": "C032", "t": 22, "caller": "555-0401", "transcript": "A man collapsed in the hallway at Riverside Apartments, he is not responding", "audio": null, "type": "medical", "points": 7, "level": "P1", "reasons": ["unresponsive (+4)", "collapse (+3)"], "accidental": false, "cluster": 5, "match": {"with": "C031", "score": 0.99, "dist_m": 43, "geo": 1.0, "time": 0.95, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.68988505937454, "lon": -73.99404549699211, "acc": 25}, {"id": "C037", "t": 25, "caller": "555-0601", "transcript": "My neighbors are watching a movie with explosions and gunshots way too loud", "audio": null, "type": "violence", "points": 0, "level": "P4", "reasons": ["gunfire (+5)", "benign context (movie/bbq/etc.) - suppressed"], "accidental": false, "cluster": 6, "match": null, "loc_source": "phone", "lat": 40.73992326766058, "lon": -74.0195414604206, "acc": 25}, {"id": "C023", "t": 30, "caller": "555-0212", "transcript": "Small fender bender on Elm Street, no injuries, just exchanging info", "audio": null, "type": "crash", "points": 0, "level": "P4", "reasons": [], "accidental": false, "cluster": 7, "match": null, "loc_source": "phone", "lat": 40.70041237881404, "lon": -74.02054299995756, "acc": 25}, {"id": "C038", "t": 33, "caller": "555-0602", "transcript": "Neighbor's barbecue is making smoke, probably fine", "audio": null, "type": "fire", "points": 0, "level": "P4", "reasons": ["smoke (+1)", "benign context (movie/bbq/etc.) - suppressed"], "accidental": false, "cluster": 8, "match": null, "loc_source": "phone", "lat": 40.699962340994276, "lon": -74.03008857095628, "acc": 25}, {"id": "C039", "t": 35, "caller": "555-0603", "transcript": "", "audio": "silent", "type": "other", "points": 1, "level": "P3", "reasons": ["open line, no speech (callback needed) (+1)"], "accidental": false, "cluster": 9, "match": null, "loc_source": "phone", "lat": 40.68978770638007, "lon": -73.9999312839224, "acc": 80}, {"id": "C033", "t": 40, "caller": "555-0500", "transcript": "Car stuck in the water at Mill Creek Bridge, the driver cannot get out, a child is in the back", "audio": null, "type": "water", "points": 5, "level": "P1", "reasons": ["trapped (can't get out) (+3)", "vulnerable person: child (+2)"], "accidental": false, "cluster": 10, "match": null, "loc_source": "phone", "lat": 40.68618411082669, "lon": -74.02818351470489, "acc": 25}, {"id": "C034", "t": 42, "caller": "555-0501", "transcript": "Flooded road at Mill Creek Bridge, a car is submerged", "audio": null, "type": "water", "points": 0, "level": "P4", "reasons": [], "accidental": false, "cluster": 10, "match": {"with": "C033", "score": 0.99, "dist_m": 50, "geo": 1.0, "time": 0.95, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.68573451555262, "lon": -74.0281442629142, "acc": 25}, {"id": "C035", "t": 44, "caller": "555-0502", "transcript": "Someone drowning at the Mill Creek Bridge, water is rising fast", "audio": null, "type": "water", "points": 5, "level": "P1", "reasons": ["drowning (+5)"], "accidental": false, "cluster": 10, "match": {"with": "C034", "score": 0.99, "dist_m": 44, "geo": 1.0, "time": 0.95, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.685643914831594, "lon": -74.02865430887734, "acc": 25}, {"id": "C040", "t": 50, "caller": "555-0700", "transcript": "There is a huge fire at the warehouse on 5th and Oak, lots of black smoke", "audio": null, "type": "fire", "points": 3, "level": "P2", "reasons": ["fire (+2)", "smoke (+1)"], "accidental": false, "cluster": 1, "match": {"with": "C013", "score": 0.86, "dist_m": 72, "geo": 0.98, "time": 0.15, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71337441587637, "lon": -74.00570570354274, "acc": 40}, {"id": "C041", "t": 52, "caller": "555-0701", "transcript": "Building on fire near 5th and Oak, flames coming out of the roof", "audio": null, "type": "fire", "points": 4, "level": "P2", "reasons": ["fire (+2)", "flames (+2)"], "accidental": false, "cluster": 1, "match": {"with": "C040", "score": 0.89, "dist_m": 138, "geo": 0.74, "time": 0.95, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71215613416586, "lon": -74.00536553523237, "acc": 20}, {"id": "C042", "t": 55, "caller": "555-0702", "transcript": "Warehouse blaze on Oak, thick smoke everywhere", "audio": null, "type": "fire", "points": 1, "level": "P3", "reasons": ["smoke (+1)"], "accidental": false, "cluster": 1, "match": {"with": "C040", "score": 0.98, "dist_m": 45, "geo": 1.0, "time": 0.88, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.71298320544999, "lon": -74.00558318300352, "acc": 20}, {"id": "C043", "t": 58, "caller": "555-0703", "transcript": "I can see smoke and flames from the old warehouse, fire trucks needed", "audio": null, "type": "fire", "points": 5, "level": "P1", "reasons": ["smoke (+1)", "flames (+2)", "fire (+2)"], "accidental": false, "cluster": 1, "match": {"with": "C040", "score": 0.91, "dist_m": 102, "geo": 0.86, "time": 0.8, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.713103532826615, "lon": -74.00686108127323, "acc": 20}, {"id": "C044", "t": 63, "caller": "555-0704", "transcript": "I can see smoke and flames from the old warehouse, fire trucks needed", "audio": null, "type": "fire", "points": 5, "level": "P1", "reasons": ["smoke (+1)", "flames (+2)", "fire (+2)"], "accidental": false, "cluster": 1, "match": {"with": "C042", "score": 0.97, "dist_m": 57, "geo": 1.0, "time": 0.8, "type": 1.0, "text": 1.0, "same_caller": false}, "loc_source": "phone", "lat": 40.713344060672384, "lon": -74.0060611792881, "acc": 40}], "clusters": [{"id": 1, "place": "5th And Oak"}, {"id": 2, "place": "Lincoln High"}, {"id": 3, "place": "Highway 9 Overpass"}, {"id": 4, "place": "5th And Oak"}, {"id": 5, "place": "Riverside Apartments"}, {"id": 6, "place": "Unlabeled area"}, {"id": 7, "place": "Unlabeled area"}, {"id": 8, "place": "Unlabeled area"}, {"id": 9, "place": "Riverside Apartments"}, {"id": 10, "place": "Mill Creek Bridge"}], "config": {"levels": {"P1": 5, "P2": 3, "P3": 1}, "size_bumps": [[10, 2], [5, 1]], "threshold": 0.6, "vocab": {"phrases": {"not breathing": [6, "not breathing"], "isnt breathing": [6, "not breathing"], "stopped breathing": [6, "not breathing"], "no pulse": [6, "no pulse"], "not responding": [4, "unresponsive"], "not moving": [3, "not moving"], "cant breathe": [5, "cant breathe"], "cant get out": [3, "trapped (can't get out)"], "cannot get out": [3, "trapped (can't get out)"], "gun shots": [5, "gunfire"], "people inside": [3, "people inside"], "someone inside": [3, "people inside"], "gas leak": [3, "gas leak"], "chest pain": [4, "chest pain"], "shots fired": [6, "shots fired"], "heavily bleeding": [4, "heavy bleeding"], "bleeding badly": [4, "heavy bleeding"], "dont know what to do": [2, "distress: doesn't know what to do"], "going to die": [5, "distress: going to die"], "gonna die": [5, "distress: going to die"], "oh my god": [1, "distress: panic"], "please help": [2, "distress: pleading for help"], "need help": [2, "distress: needs help"], "cant think": [1, "distress: panic"], "i am scared": [1, "distress: fear"], "im scared": [1, "distress: fear"]}, "words": {"weapon": [5, "weapon"], "gun": [5, "gun"], "knife": [5, "knife"], "shots": [5, "gunfire"], "gunshots": [5, "gunfire"], "gunfire": [5, "gunfire"], "dying": [5, "dying"], "die": [3, "fear of dying"], "panic": [2, "distress: panic"], "panicking": [2, "distress: panic"], "scared": [1, "distress: fear"], "terrified": [2, "distress: terror"], "help": [1, "distress: calling for help"], "wreck": [2, "wreck"], "rollover": [2, "rollover"], "shooter": [6, "shooter"], "hostage": [6, "hostage"], "armed": [5, "armed person"], "stabbed": [5, "stabbing"], "explosion": [5, "explosion"], "drowning": [5, "drowning"], "choking": [5, "choking"], "trapped": [4, "trapped"], "unconscious": [4, "unconscious"], "seizure": [3, "seizure"], "bleeding": [3, "bleeding"], "fire": [2, "fire"], "flames": [2, "flames"], "smoke": [1, "smoke"], "crash": [2, "crash"], "collision": [2, "collision"], "flood": [2, "flooding"], "fight": [1, "fight"], "collapsed": [3, "collapse"], "overdose": [5, "overdose"]}, "vulnerable": ["baby", "child", "children", "elderly", "infant", "kid", "kids", "pregnant", "toddler", "wheelchair"], "critical": ["school", "hospital", "nursing home", "stadium", "daycare", "kindergarten", "lincoln high"], "hazard": ["armed", "collision", "crash", "drowning", "explosion", "fight", "fire", "flames", "flood", "gun", "hostage", "knife", "shooter", "shots", "smoke", "stabbed", "trapped", "weapon"], "negators": ["doesnt", "dont", "isnt", "neither", "never", "no", "nobody", "nor", "not", "wasnt", "without"], "benign": ["barbecue", "bbq", "film", "fireworks", "game", "laughing", "movie", "prank", "tv", "video"], "accidental": ["pocket", "butt dial", "butt-dial", "wrong number", "dialed by accident", "sorry my phone"], "stop": ["a", "an", "and", "are", "as", "at", "be", "but", "by", "can", "can't", "cant", "for", "from", "he", "help", "her", "his", "hurry", "i", "im", "in", "is", "it", "its", "ive", "just", "me", "my", "now", "of", "on", "or", "our", "please", "really", "she", "some", "that", "the", "them", "there", "they", "this", "to", "very", "was", "we", "were", "with", "you"], "syn": {"collision": "crash", "collided": "crash", "wreck": "crash", "accident": "crash", "blaze": "fire", "flames": "fire", "burning": "fire", "vehicles": "car", "cars": "car", "vehicle": "car", "truck": "car", "gunshots": "shots", "shooting": "shots", "shot": "shots", "gunman": "shooter", "kids": "child", "kid": "child", "children": "child", "baby": "child", "infant": "child", "flooded": "flood", "submerged": "water", "river": "water", "creek": "water", "bridge": "bridge"}, "type_words": {"violence": ["armed", "fight", "gun", "gunfire", "gunshots", "hostage", "knife", "shooter", "shots", "stabbed", "weapon"], "fire": ["blaze", "burning", "fire", "flames", "smoke"], "crash": ["accident", "collided", "collision", "crash", "fender", "rollover", "wreck"], "water": ["creek", "drowning", "flood", "submerged", "water"], "hazmat": ["chemical", "fumes", "gas"], "medical": ["bleeding", "breathing", "chest", "choking", "collapsed", "die", "dizzy", "dying", "heart", "pulse", "seizure", "unconscious"]}, "gazetteer": {"5th and oak": [40.7128, -74.006], "lincoln high": [40.7326, -73.9815], "highway 9 overpass": [40.72, -74.039], "riverside apartments": [40.6903, -73.9942], "mill creek bridge": [40.6858, -74.028]}}}};
+const RANK = {P1:0,P2:1,P3:2,P4:3}, NAMES = ["P1","P2","P3","P4"];
+const COLOR = {P1:"var(--p1)",P2:"var(--p2)",P3:"var(--p3)",P4:"var(--p4)"};
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const open = new Set(), seenP1 = new Set();
+
+const units=()=>+document.getElementById("units").value;
+function levelOf(points){const L=DATA.config.levels;return points>=L.P1?"P1":points>=L.P2?"P2":points>=L.P3?"P3":"P4"}
+function bump(level,n){return NAMES[Math.max(0,RANK[level]-n)]}
+
+function snapshot(T){
+  const calls = DATA.calls.filter(c=>c.t<=T);
+  const real = calls.filter(c=>!c.accidental);
+  const out = DATA.clusters.map(cl=>{
+    const m = real.filter(c=>c.cluster===cl.id);
+    if(!m.length) return null;
+    const callers = new Set(m.map(c=>c.caller)).size;
+    const maxPts = Math.max(...m.map(c=>c.points));
+    let base = levelOf(maxPts), level = base, reasons = [];
+    for(const [n,b] of DATA.config.size_bumps){ if(callers>=n){ level=bump(base,b); if(level!==base) reasons.push(callers+" distinct callers: surge escalation"); break; } }
+    const first = m[0];
+    const escalated = RANK[level] < RANK[levelOf(first.points)];
+    const all = [...new Set(m.flatMap(c=>c.reasons.filter(r=>!r.includes("ignored")&&!r.includes("suppressed")).map(r=>r.replace(/ \(\+\d+\)/,""))))];
+    return {id:cl.id, place:cl.place, calls:m, callers, level, escalated, reasons:[...reasons,...all],
+      lat:m.reduce((a,c)=>a+c.lat,0)/m.length, lon:m.reduce((a,c)=>a+c.lon,0)/m.length,
+      types:[...new Set(m.map(c=>c.type).filter(t=>t!=="other"))], firstT:first.t, lastT:m[m.length-1].t};
+  }).filter(Boolean);
+  for(const i of out){
+    const recent=i.calls.filter(c=>c.t>T-10).length, maxPts=Math.max(...i.calls.map(c=>c.points));
+    const allReasons=i.calls.flatMap(c=>c.reasons).join(" ");
+    const f={
+      "Time-critical":Math.min(1,maxPts/8),
+      "Lives at risk":Math.min(1,.15+i.callers/10),
+      "Growth":Math.min(1,recent/5*.7+(i.escalated?.3:0)),
+      "Vulnerability":/vulnerable/.test(allReasons)?1:/critical location/.test(allReasons)?.7:0,
+      "Confidence":Math.min(1,i.callers/4)};
+    const w=Math.min(10,.25*(T-i.firstT)), tier={P1:30,P2:10,P3:0,P4:-10}[i.level];
+    i.factors=f; i.wait=w;
+    i.score=Math.round(40*f["Time-critical"]+25*f["Lives at risk"]+15*f["Growth"]+10*f["Vulnerability"]+10*f["Confidence"]+w+tier);
+  }
+  out.sort((a,b)=>b.score-a.score);
+  out.forEach((i,k)=>i.rank=k+1);
+  return {calls, out, filtered:calls.filter(c=>c.accidental)};
+}
+
+function card(i){
+  const fresh = i.level==="P1" && !seenP1.has(i.id); if(i.level==="P1") seenP1.add(i.id);
+  return `<div class="card ${i.level} ${fresh?"fresh":""} ${open.has(i.id)?"open":""}" data-id="${i.id}">
+    <div class="top"><b><span class="rank">${i.rank}</span>${esc(i.place)} <span class="meta">· ${esc(i.types.join("/")||"unclassified")}</span></b>
+      <span>${i.level==="P1"||i.level==="P2"?(i.rank<=units()?'<span class="disp go">DISPATCH NOW</span>':'<span class="disp wait">QUEUED</span>'):""}<span class="score" title="response score">${i.score}</span><span class="badge ${i.level}">${i.level}</span></span></div>
+    <div class="meta">${i.calls.length} calls → 1 incident · ${i.callers} callers · first at ${i.firstT} min, latest ${i.lastT} min</div>
+    ${i.escalated?`<div class="esc">▲ Escalated since first report</div>`:""}
+    <div class="bars">${Object.entries(i.factors).map(([k,v])=>`<div class="bar">${k}<i><u style="width:${Math.round(v*100)}%"></u></i></div>`).join("")}<div class="bar">Waiting +${i.wait.toFixed(1)}</div></div>
+    ${(i.level==="P1"||i.level==="P2")&&i.rank>units()?`<div class="note">No unit free: send automated callback and self-help guidance (e.g. CPR / shelter instructions) while queued.</div>`:""}
+    <div class="tags">${i.reasons.slice(0,8).map(r=>`<span>${esc(r)}</span>`).join("")}</div>
+    <div class="calls">${i.calls.map(c=>`<div class="call"><b>${c.id}</b> <span class="meta">t=${c.t} · ${esc(c.caller)} · ${c.level}</span><br>${esc(c.transcript||"(no speech)")}
+      <div class="why">${c.audio?"audio: "+esc(c.audio)+" · ":""}location: ${esc(c.loc_source)}${c.reasons.length?" · "+esc(c.reasons.join("; ")):""}</div>
+      ${c.match?`<div class="dup">⇄ linked to ${c.match.with}: score ${c.match.score} (dist ${c.match.dist_m} m, geo ${c.match.geo}, time ${c.match.time}, text ${c.match.text}${c.match.same_caller?", same caller":""})</div>`:`<div class="dup">first report of this incident</div>`}</div>`).join("")}</div>
+  </div>`;
+}
+
+const HEX = {P1:"#ff4d4f",P2:"#ff9f43",P3:"#f7c948",P4:"#6b7788"};
+const map = L.map("map",{zoomControl:true,attributionControl:true});
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  {maxZoom:19,className:"darktiles",attribution:"&copy; OpenStreetMap contributors"}).addTo(map);
+const layer = L.layerGroup().addTo(map);
+map.fitBounds(L.latLngBounds(DATA.calls.map(c=>[c.lat,c.lon])).pad(0.15));
+const pins = {};
+
+function flyTo(id){const i=pins[id]; if(i) map.flyTo(i,15,{duration:.8});}
+
+function drawMap(incs, calls){
+  layer.clearLayers();
+  for(const c of calls){ if(c.accidental) continue; const cl=incs.find(i=>i.id===c.cluster);
+    L.circle([c.lat,c.lon],{radius:Math.min(Math.max(c.acc,8),200),color:HEX[cl?cl.level:"P4"],weight:1,fillOpacity:.08,opacity:.5}).addTo(layer);
+    L.circleMarker([c.lat,c.lon],{radius:3,color:"#fff",weight:1,fillColor:HEX[cl?cl.level:"P4"],fillOpacity:.9}).addTo(layer)
+      .bindTooltip(c.id+": "+c.transcript.slice(0,60)); }
+  for(const i of incs){
+    const size = 34+Math.sqrt(i.callers)*10; pins[i.id]=[i.lat,i.lon];
+    const icon = L.divIcon({className:"",iconSize:[size,size],iconAnchor:[size/2,size/2],
+      html:`<div class="pin ${i.level}" style="width:${size}px;height:${size}px"><div class="ring" style="background:${HEX[i.level]}"></div><div class="core" style="background:${HEX[i.level]}"></div><b>${RANK[i.level]<=1?"#"+i.rank:i.callers}</b></div>`});
+    L.marker([i.lat,i.lon],{icon}).addTo(layer)
+      .bindPopup(`<b>${esc(i.place)}</b> &middot; ${i.level}<br>${i.calls.length} calls &rarr; 1 incident<br>rank #${i.rank} &middot; score ${i.score}<br>${esc(i.types.join("/")||"unclassified")}${i.escalated?"<br><b style='color:#d33'>Escalated</b>":""}`)
+      .on("click",()=>{open.add(i.id);render();document.querySelector(`.card[data-id="${i.id}"]`)?.scrollIntoView({block:"center"});});
+  }
+}
+
+function render(){
+  const T = +document.getElementById("slider").value;
+  document.getElementById("clock").textContent = "T+"+T+" min";
+  const {calls,out,filtered} = snapshot(T);
+  const urgent = out.filter(i=>RANK[i.level]<=1), rest = out.filter(i=>RANK[i.level]>1);
+  const real = calls.length-filtered.length;
+  document.getElementById("stats").innerHTML = [
+    ["Calls received",calls.length],["Incidents",out.length],["Duplicates collapsed",real-out.length],
+    ["P1 incidents",out.filter(i=>i.level==="P1").length],["Filtered",filtered.length]
+  ].map(([l,v])=>`<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+  document.getElementById("urgent").innerHTML = urgent.map(card).join("")||'<div class="empty">None</div>';
+  document.getElementById("other").innerHTML = rest.map(card).join("")||'<div class="empty">None</div>';
+  document.getElementById("filtered").innerHTML = filtered.map(c=>`<div class="call"><b>${c.id}</b> ${esc(c.transcript)}<div class="why">flagged accidental - excluded from incident counts, kept in audit log</div></div>`).join("")||'<div class="empty">None</div>';
+  drawMap(out, calls);
+}
+
+document.addEventListener("click",e=>{const c=e.target.closest(".card"); if(!c) return; const id=+c.dataset.id; open.has(id)?open.delete(id):(open.add(id),flyTo(id)); render();});
+const slider = document.getElementById("slider"); slider.oninput = render;
+document.getElementById("units").oninput=e=>{document.getElementById("unitsv").textContent=e.target.value;render();};
+let timer=null;
+document.getElementById("play").onclick=()=>{
+  if(timer){clearInterval(timer);timer=null;return}
+  slider.value=0; seenP1.clear(); render();
+  timer=setInterval(()=>{ if(+slider.value>=+slider.max){clearInterval(timer);timer=null;return} slider.value=+slider.value+1; render(); },250);
+};
+render();
+</script>
+<script>
+/* Live voice intake: Web Speech API transcription + keyword triage + vocal-stress estimate.
+   Reuses DATA, render(), flyTo(), esc() from the dashboard script. */
+(function () {
+  const V = DATA.config.vocab;
+  const $ = id => document.getElementById(id);
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const clamp = x => Math.max(0, Math.min(1, x));
+
+  // ------------------------------------------------------------ scoring (mirror of engine.py)
+  const clean = t => t.toLowerCase().replace(/['’]/g, "").replace(/\bfifth\b/g, "5th")
+    .replace(/[^a-z0-9 \n]/g, "").replace(/\s+/g, " ").trim();
+  const toks = t => clean(t).split(" ").filter(Boolean);
+  const canon = t => new Set(toks(t).filter(w => !V.stop.includes(w) && w.length > 1).map(w => V.syn[w] || w));
+  const dice = (a, b) => { if (!a.size || !b.size) return 0; let n = 0; a.forEach(x => b.has(x) && n++); return 2 * n / (a.size + b.size); };
+  const hav = (a, b, c, d) => { const r = 6371000, p = Math.PI / 180, dp = (c - a) * p, dl = (d - b) * p;
+    const h = Math.sin(dp / 2) ** 2 + Math.cos(a * p) * Math.cos(c * p) * Math.sin(dl / 2) ** 2; return 2 * r * Math.asin(Math.sqrt(h)); };
+
+  function classify(text) {
+    const set = new Set(toks(text)); let best = "other", bn = 0; const seen = new Set();
+    for (const [t, words] of Object.entries(V.type_words)) {
+      const n = words.filter(w => set.has(w)).length;
+      if (n) seen.add(t);
+      if (n > bn) { best = t; bn = n; }
+    }
+    return [best, seen.size ? seen : new Set(["other"])];
+  }
+
+  function scorePriority(raw, audioCue) {
+    let text = clean(raw), points = 0; const reasons = [];
+    for (const [ph, [pts, label]] of Object.entries(V.phrases)) {
+      if (text.includes(ph)) { points += pts; reasons.push(`${label} (+${pts})`); text = text.split(ph).join(" "); }
+    }
+    const tk = text.split(" ").filter(Boolean), hits = new Set();
+    tk.forEach((t, i) => {
+      const w = V.words[t]; if (!w) return;
+      if (tk.slice(Math.max(0, i - 6), i).some(x => V.negators.includes(x))) { reasons.push(`'${t}' negated - ignored`); return; }
+      points += w[0]; hits.add(t); reasons.push(`${w[1]} (+${w[0]})`);
+    });
+    const vul = V.vulnerable.filter(x => tk.includes(x)).sort();
+    if (vul.length) { points += 2; reasons.push(`vulnerable person: ${vul[0]} (+2)`);
+      if (V.hazard.some(h => hits.has(h))) { points += 1; reasons.push("hazard + vulnerable person (+1)"); } }
+    const place = V.critical.filter(p => clean(raw).includes(p));
+    if (place.length) { points += 2; reasons.push(`critical location: ${place[0]} (+2)`); }
+    const benign = V.benign.some(b => tk.includes(b));
+    if (benign) { points = Math.min(points, 0); reasons.push("benign context (movie/bbq/etc.) - suppressed"); }
+    else if (audioCue && audioCue.pts) { points += audioCue.pts; reasons.push(`${audioCue.label} (+${audioCue.pts})`); }
+    return { points, reasons };
+  }
+
+  function analyze(text) {
+    const cue = stressCue();
+    const { points, reasons } = scorePriority(text, cue);
+    return { points, reasons, level: levelOf(points), cue };
+  }
+
+  // ------------------------------------------------------------ audio / vocal stress
+  const aud = { ctx: null, stream: null, an: null, timer: null, frames: [], hist: [], baseline: null, firstVoice: 0, live: 0, ok: false };
+  const VOICED_DB = -48;
+
+  async function startAudio() {
+    aud.frames = []; aud.hist = []; aud.baseline = null; aud.firstVoice = 0; aud.live = 0; aud.ok = false;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+    try {
+      aud.stream = await navigator.mediaDevices.getUserMedia({ audio: { autoGainControl: false, noiseSuppression: false, echoCancellation: false } });
+      aud.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = aud.ctx.createMediaStreamSource(aud.stream);
+      aud.an = aud.ctx.createAnalyser(); aud.an.fftSize = 1024; src.connect(aud.an);
+      const buf = new Float32Array(aud.an.fftSize); let tick = 0;
+      aud.ok = true;
+      aud.timer = setInterval(() => {
+        aud.an.getFloatTimeDomainData(buf);
+        let sum = 0; for (const v of buf) sum += v * v;
+        const db = 20 * Math.log10(Math.max(Math.sqrt(sum / buf.length), 1e-5));
+        const now = performance.now(), voiced = db > VOICED_DB;
+        aud.frames.push({ t: now, db, voiced });
+        if (voiced && !aud.firstVoice) aud.firstVoice = now;
+        $("dbv").textContent = db.toFixed(0) + " dBFS";
+        $("dbbar").style.width = Math.round(clamp((db + 60) / 50) * 100) + "%";
+        if (!aud.baseline) { const v = aud.frames.filter(f => f.voiced); if (v.length >= 20) aud.baseline = median(v.slice(0, 20).map(f => f.db)); }
+        if (++tick % 5 === 0) updateStress();
+      }, 100);
+    } catch (e) { aud.ok = false; setStatus("Microphone level unavailable (" + e.name + "); stress index disabled."); }
+  }
+
+  function stopAudio() {
+    clearInterval(aud.timer);
+    if (aud.stream) aud.stream.getTracks().forEach(t => t.stop());
+    if (aud.ctx) aud.ctx.close().catch(() => {});
+    aud.stream = aud.ctx = null;
+  }
+
+  const median = a => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+
+  function updateStress() {
+    const now = performance.now(), win = aud.frames.filter(f => now - f.t < 4000 && f.voiced);
+    if (win.length < 5) return;
+    const mean = win.reduce((s, f) => s + f.db, 0) / win.length;
+    const words = toks($("vt").value).length, secs = (now - aud.firstVoice) / 1000;
+    const wpm = secs > 4 ? words / secs * 60 : 0;
+    const abs = clamp((mean + 32) / 14), rate = wpm ? clamp((wpm - 150) / 70) : 0;
+    let idx;
+    if (aud.baseline !== null) {
+      const loud = clamp((mean - aud.baseline) / 10);
+      const peak = clamp(win.filter(f => f.db > aud.baseline + 10).length / win.length / 0.2);
+      idx = 100 * (0.3 * loud + 0.25 * abs + 0.2 * peak + 0.25 * rate);
+    } else idx = 100 * (0.6 * abs + 0.4 * rate);
+    aud.live = idx; aud.hist.push({ idx, mean });
+    $("stv").textContent = Math.round(idx) + " (" + stressLabel(idx) + ")";
+    $("stbar").style.width = Math.round(idx) + "%";
+    $("stbar").style.background = idx >= 60 ? "var(--p1)" : idx >= 35 ? "var(--p2)" : "var(--ok)";
+  }
+
+  const stressLabel = i => i >= 60 ? "high" : i >= 35 ? "elevated" : "low";
+  function stressFinal() {   // 85th percentile of the session, robust to a single spike
+    if (aud.hist.length < 2) return null;
+    const s = aud.hist.map(h => h.idx).sort((a, b) => a - b);
+    const voiced = aud.frames.filter(f => f.voiced);
+    const mean = voiced.length ? voiced.reduce((a, f) => a + f.db, 0) / voiced.length : -99;
+    return { idx: s[Math.floor(s.length * 0.85)], whisper: voiced.length >= 10 && mean < -46, mean };
+  }
+  function stressCue() {
+    const f = stressFinal(); if (!f) return null;
+    if (f.whisper) return { pts: 2, label: "whispering caller", idx: f.idx };
+    if (f.idx >= 60) return { pts: 2, label: "high vocal stress (loud/fast speech)", idx: f.idx };
+    if (f.idx >= 35) return { pts: 1, label: "elevated vocal stress", idx: f.idx };
+    return { pts: 0, label: "", idx: f.idx };
+  }
+
+  // ------------------------------------------------------------ recording state (plain object, same role as a React ref)
+  const rec = { id: null, phone: null, lastPush: 0, isRecording: false, recognition: null, finalText: "", interim: "", restartTimer: null };
+
+  function setStatus(t) { $("vstatus").textContent = t; }
+  function warn(t) { const w = $("vwarn"); w.textContent = t; w.style.display = t ? "block" : "none"; }
+
+  function buildRecognition() {
+    const r = new SR();
+    r.continuous = true; r.interimResults = true; r.lang = "en-US";
+    r.onresult = e => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const txt = e.results[i][0].transcript;
+        if (e.results[i].isFinal) rec.finalText += txt.trim() + " "; else interim += txt;
+      }
+      rec.interim = interim;
+      $("vt").value = rec.finalText + interim;
+      refreshLive(); liveUpdate();
+    };
+    r.onerror = e => {
+      if (e.error === "no-speech" || e.error === "aborted") return;           // auto-restart handles it
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") { warn("Microphone permission was denied. Allow it in the address bar, or type the transcript instead."); rec.isRecording = false; }
+      else if (e.error === "audio-capture") { warn("No microphone found."); rec.isRecording = false; }
+      else if (e.error === "network") warn("Speech service unreachable (needs internet). You can type the transcript instead.");
+    };
+    r.onend = () => {                                                           // browsers stop on silence: restart while active
+      if (!rec.isRecording) return;
+      clearTimeout(rec.restartTimer);
+      rec.restartTimer = setTimeout(() => { try { if (rec.isRecording) r.start(); } catch (_) { /* already started */ } }, 150);
+    };
+    return r;
+  }
+
+  async function startRecording() {
+    warn("");
+    rec.finalText = ""; rec.interim = ""; $("vt").value = ""; $("vresult").style.display = "none";
+    rec.isRecording = true; rec.id = "LIVE-" + String(++liveN).padStart(2, "0"); rec.lastPush = 0;
+    rec.phone = (await phoneLocation()) || { lat: CITY_FAR[0], lon: CITY_FAR[1], acc: 500 };
+    rec.recognition = buildRecognition();
+    try { rec.recognition.start(); } catch (e) { warn("Could not start speech recognition: " + e.message); rec.isRecording = false; return; }
+    await startAudio();
+    ui(true); $("vt").readOnly = true; setStatus("Recording... speak naturally. Press Stop & submit call when finished.");
+  }
+
+  function stopRecording() {
+    if (!rec.isRecording) return;
+    rec.isRecording = false;                                                    // stops auto-restart first
+    clearTimeout(rec.restartTimer);
+    setStatus("Finishing transcription...");
+    $("mic").disabled = $("analyze").disabled = true;
+    try { rec.recognition.stop(); } catch (_) {}
+    setTimeout(() => {                                                          // let trailing final results arrive
+      const text = (rec.finalText + rec.interim).trim();
+      rec.interim = "";
+      stopAudio(); ui(false); $("vt").readOnly = false; $("vt").value = text;
+      if (text) submit(text, true); else { dropCall(rec.id); render(); setStatus("No speech captured. Try again or type the transcript."); }
+    }, 800);
+  }
+
+  function ui(recording) {
+    $("mic").classList.toggle("rec", recording);
+    $("mic").disabled = false; $("analyze").disabled = false;
+    $("analyze").textContent = recording ? "Stop & submit call" : "Analyze & submit as call";
+  }
+
+  // ------------------------------------------------------------ live keyword chips while speaking
+  function refreshLive() {
+    const text = $("vt").value.trim();
+    if (!text) { $("livechips").innerHTML = ""; return; }
+    const a = analyze(text);
+    $("livechips").innerHTML = `<span class="badge ${a.level}">${a.level}</span> <span class="meta">${a.points} pts (live)</span><div class="tags">` +
+      a.reasons.map(r => `<span>${esc(r)}</span>`).join("") + "</div>";
+  }
+
+  // ------------------------------------------------------------ submit the finalized transcript as a call
+  const CITY_FAR = [40.78, -73.95];
+  function phoneLocation() {
+    const v = $("loc").value;
+    if (v === "far") return Promise.resolve({ lat: CITY_FAR[0], lon: CITY_FAR[1], acc: 25 });
+    if (v === "gps") return new Promise(res => {
+      if (!navigator.geolocation) return res(null);
+      navigator.geolocation.getCurrentPosition(p => res({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }), () => res(null), { timeout: 4000 });
+    });
+    const g = V.gazetteer[v];
+    return Promise.resolve({ lat: g[0] + (Math.random() - .5) * 0.0004, lon: g[1] + (Math.random() - .5) * 0.0004, acc: 25 });
+  }
+
+  const typesOf = c => c._types || (c._types = classify(c.transcript)[1]);
+  const toksOf = c => c._toks || (c._toks = canon(c.transcript));
+
+  function pairScore(a, b, clTypes) {
+    const d = hav(a.lat, a.lon, b.lat, b.lon), slack = Math.max(0, d - (a.acc + b.acc));
+    let geo = Math.max(0, 1 - slack / 300); if (Math.max(a.acc, b.acc) > 300) geo *= .4;
+    const dt = Math.abs(a.t - b.t), time = Math.max(0, 1 - dt / 40);
+    const isOther = s => s.size === 1 && s.has("other");
+    let compat, ts;
+    if (isOther(typesOf(a)) || isOther(clTypes)) { compat = true; ts = .7; }
+    else { compat = [...typesOf(a)].some(x => clTypes.has(x)); ts = compat ? 1 : 0; }
+    const text = Math.min(1, dice(toksOf(a), toksOf(b)) / .35);
+    let score = .4 * geo + .15 * time + .2 * ts + .25 * text;
+    if (!compat) score *= .3;
+    const same = a.caller === b.caller && dt <= 45;
+    if (same) score = Math.max(score, .5) + .25;
+    return { score, dist_m: Math.round(d), geo: +geo.toFixed(2), time: +time.toFixed(2), text: +text.toFixed(2), same_caller: same };
+  }
+
+  function placeLabel(lat, lon) {
+    let best = "Unlabeled area", bd = 600;
+    for (const [n, [a, b]] of Object.entries(V.gazetteer)) { const d = hav(lat, lon, a, b); if (d < bd) { bd = d; best = n.replace(/\b\w/g, c => c.toUpperCase()).replace("5Th", "5th"); } }
+    return best;
+  }
+
+  let liveN = 0;
+  function dropCall(id) {                                   // remove a provisional call (and its cluster if it was alone)
+    const k = DATA.calls.findIndex(c => c.id === id); if (k < 0) return;
+    const [c] = DATA.calls.splice(k, 1);
+    if (c.cluster && !DATA.calls.some(x => x.cluster === c.cluster)) DATA.clusters = DATA.clusters.filter(x => x.id !== c.cluster);
+  }
+
+  function ingest(text, phone, id, final) {
+    dropCall(id);
+    const T = +$("slider").value, ct = clean(text);
+    let lat = phone.lat, lon = phone.lon, acc = phone.acc, src = "phone";
+    for (const [n, [gl, go]] of Object.entries(V.gazetteer)) {
+      if (ct.includes(n)) { if (acc > 300 || hav(lat, lon, gl, go) > 500) { lat = gl; lon = go; acc = 60; src = "spoken address: " + n; } break; }
+    }
+    const a = analyze(text), [type, types] = classify(text);
+    const accidental = V.accidental.some(k => text.toLowerCase().includes(k));
+    const call = { id, t: T, caller: "live-" + id, transcript: text, audio: a.cue && a.cue.label ? a.cue.label : null,
+      type, points: a.points, level: a.level, reasons: a.reasons, accidental, cluster: null, match: null,
+      loc_source: src, lat, lon, acc, _types: types, _toks: canon(text) };
+    if (!accidental) {
+      let best = 0, bestCl = null, bestM = null, bestD = null;
+      for (const cl of DATA.clusters) {
+        const members = DATA.calls.filter(c => c.cluster === cl.id && !c.accidental && c.t <= T);
+        if (!members.length) continue;
+        const u = new Set(); members.forEach(m => typesOf(m).forEach(x => u.add(x))); u.delete("other");
+        const clTypes = u.size ? u : new Set(["other"]);
+        for (const m of members) { const r = pairScore(call, m, clTypes); if (r.score > best) { best = r.score; bestCl = cl; bestM = m; bestD = r; } }
+      }
+      if (bestCl && best >= DATA.config.threshold) {
+        call.cluster = bestCl.id;
+        call.match = { with: bestM.id, score: +Math.min(best, 1).toFixed(2), dist_m: bestD.dist_m, geo: bestD.geo, time: bestD.time, text: bestD.text, same_caller: bestD.same_caller };
+      } else {
+        const nid = Math.max(0, ...DATA.clusters.map(c => c.id)) + 1;
+        DATA.clusters.push({ id: nid, place: placeLabel(lat, lon) }); call.cluster = nid;
+      }
+    }
+    DATA.calls.push(call);
+    render();
+    showResult(call, a, final);
+    return call;
+  }
+
+  function liveUpdate() {                                   // points and incident update while the caller is still talking
+    const now = Date.now(), text = (rec.finalText + rec.interim).trim();
+    if (!text || !rec.id || now - rec.lastPush < 1000) return;
+    rec.lastPush = now;
+    ingest(text, rec.phone, rec.id, false);
+  }
+
+  async function submit(text, final) {
+    setStatus("Analyzing call...");
+    const fromVoice = !!(rec.id && rec.phone);
+    const phone = fromVoice ? rec.phone : ((await phoneLocation()) || { lat: CITY_FAR[0], lon: CITY_FAR[1], acc: 500 });
+    const id = fromVoice ? rec.id : "LIVE-" + String(++liveN).padStart(2, "0");
+    const call = ingest(text, phone, id, true);
+    rec.id = null; rec.phone = null; rec.finalText = "";
+    if (call.cluster) { flyTo(call.cluster); open.add(call.cluster); render(); }
+    setStatus("Call submitted: " + call.level + " (" + call.points + " pts).");
+  }
+
+  function highlight(text) {
+    const words = Object.keys(V.words).concat(V.vulnerable);
+    return esc(text).replace(new RegExp("\\b(" + words.join("|") + ")\\b", "gi"), '<span class="hl">$1</span>');
+  }
+
+  function showResult(call, a, final) {
+    const el = $("vresult"), cl = DATA.clusters.find(c => c.id === call.cluster);
+    const link = call.accidental ? "Flagged as accidental call, excluded from incident counts."
+      : call.match ? `Duplicate: linked to incident #${call.cluster} (${esc(cl.place)}), match score ${call.match.score} (${call.match.dist_m} m away).`
+      : `New incident created: #${call.cluster} (${esc(cl.place)}).`;
+    const st = a.cue ? `Vocal stress index ${Math.round(a.cue.idx)} (${stressLabel(a.cue.idx)})${a.cue.label ? " &rarr; " + esc(a.cue.label) + ` (+${a.cue.pts})` : ""}.`
+      : "Vocal stress: not measured (no mic level data; typed or very short input).";
+    el.style.display = "block";
+    el.innerHTML = `<div class="top"><b>${call.id} &middot; ${call.points} pts ${final ? "" : "<span class=\"meta\">(live, updating)</span>"}</b><span class="badge ${call.level}">${call.level}</span></div>
+      <p style="margin:6px 0">${highlight(call.transcript)}</p>
+      <div class="tags">${call.reasons.map(r => `<span>${esc(r)}</span>`).join("")}</div>
+      <p class="meta" style="margin:6px 0 0">${link}<br>${st}<br>Location: ${esc(call.loc_source)}</p>`;
+  }
+
+  // ------------------------------------------------------------ wiring
+  (function init() {
+    const sel = $("loc");
+    sel.innerHTML = Object.keys(V.gazetteer).map(n => `<option value="${esc(n)}">Phone at ${esc(n)}</option>`).join("") +
+      '<option value="far">Phone elsewhere (use spoken address)</option><option value="gps">Use my GPS</option>';
+    $("analyze").onclick = () => {
+      if (rec.isRecording) return stopRecording();                       // same button ends the recording
+      const t = $("vt").value.trim(); if (t) submit(t, true); else setStatus("Nothing to analyze.");
+    };
+    $("vt").addEventListener("input", () => { if (!rec.isRecording) refreshLive(); });
+    if (!SR) {
+      warn("Voice typing is not supported in this browser. Use Chrome or Edge on desktop (served from localhost or https). You can still type or paste a transcript below and press Analyze.");
+      $("mic").disabled = true; return;
+    }
+    $("mic").onclick = () => rec.isRecording ? stopRecording() : startRecording();
+  })();
+})();
+
+</script>
+</body>
+</html>
